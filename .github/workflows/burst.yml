@@ -11,6 +11,10 @@ on:
         description: 'Stop after this many wins per worker (0 = time only)'
         default: '0'
         required: false
+      target_rating:
+        description: 'Stop worker when its board rating reaches this (0 = off)'
+        default: '500000'
+        required: false
 
 jobs:
   b:
@@ -28,7 +32,7 @@ jobs:
           python-version: '3.12'
       - env:
           FARM_ACCOUNTS_JSON: ${{ secrets.FARM_ACCOUNTS }}
-        run: python3 workers/duel_burst.py --slot ${{ matrix.i }} --minutes ${{ inputs.minutes }} --max-wins ${{ inputs.max_wins }} 2>&1 | tee w-${{ matrix.i }}.log
+        run: python3 workers/duel_burst.py --slot ${{ matrix.i }} --minutes ${{ inputs.minutes }} --max-wins ${{ inputs.max_wins }} --target-rating ${{ inputs.target_rating }} 2>&1 | tee w-${{ matrix.i }}.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:

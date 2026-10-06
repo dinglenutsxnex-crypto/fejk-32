@@ -23,6 +23,7 @@ def arg(name, default=None):
 slot = int(arg('--slot', '0'))
 minutes = float(arg('--minutes', '15'))
 maxwins = int(arg('--max-wins', '0'))
+target = int(arg('--target-rating', '0'))
 ACCTS = json.loads(os.environ['FARM_ACCOUNTS_JSON'])
 A = ACCTS[slot % len(ACCTS)]
 GUID, SYSID, HOST = A['guid'], A['sysid'], A.get('host', '52.66.28.201')
@@ -156,8 +157,11 @@ try:
               for k, r in enumerate(rows):
                   m = parse_fields(r)
                   if m.get(1, [None])[0] == PID:
-                      print('slot=%d ONBOARD rank=%d rating=%s STOPPING' % (slot, k + 1, m.get(4, ['?'])[0]), flush=True)
-                      raise _OnBoard()
+                      rt = m.get(4, [0])[0]
+                      print('slot=%d ONBOARD rank=%d rating=%s target=%s' % (slot, k + 1, rt, target), flush=True)
+                      if target > 0 and isinstance(rt, int) and rt >= target:
+                          print('slot=%d TARGET %d REACHED STOPPING' % (slot, target), flush=True)
+                          raise _OnBoard()
           except _OnBoard:
               raise
           except Exception as ex:

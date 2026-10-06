@@ -1,0 +1,52 @@
+name: watchdog (keep bursts running until board is ours)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Burst already running?
+        id: running
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          N=$(gh api repos/${{ github.repository }}/actions/workflows/burst.yml/runs?per_page=5 --jq '[.workflow_runs[] | select(.status=="in_progress" or .status=="queued")] | length')
+          echo "active_bursts=$N"
+          echo "n=$N" >> "$GITHUB_OUTPUT"
+
+      - name: Check board
+        id: board
+        if: steps.running.outputs.n == '0'
+        env:
+          FARM_ACCOUNTS_JSON: ${{ secrets.FARM_ACCOUNTS }}
+        run: |
+          OUT=$(python3 workers/lb_watch.py)
+          echo "$OUT"
+          echo "$OUT" | grep -q '^OURS_TOP100=' || { echo 'board check failed, standing down'; exit 1; }
+          echo "ours=$(echo "$OUT" | sed -n 's/^OURS_TOP100=\([0-9]*\).*/\1/p')" >> "$GITHUB_OUTPUT"
+
+      - name: Fire burst if board not full
+        if: steps.running.outputs.n == '0' && steps.board.outputs.ours != '100'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/actions/workflows/burst.yml/dispatches \
+            -f ref=main -f inputs[minutes]=15 -f inputs[max_wins]=0
+          echo 'burst dispatched'
+
+      - name: Board full, standing down
+        if: steps.running.outputs.n == '0' && steps.board.outputs.ours == '100'
+        run: echo 'top 100 all ours - watchdog idle until names change'

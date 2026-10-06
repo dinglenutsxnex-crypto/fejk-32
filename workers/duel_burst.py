@@ -23,7 +23,7 @@ def arg(name, default=None):
 slot = int(arg('--slot', '0'))
 minutes = float(arg('--minutes', '15'))
 maxwins = int(arg('--max-wins', '0'))
-target = int(arg('--target-rating', '0'))
+GAP = 50000  # stay this far above the best outsider; recomputed every board check
 ACCTS = json.loads(os.environ['FARM_ACCOUNTS_JSON'])
 A = ACCTS[slot % len(ACCTS)]
 GUID, SYSID, HOST = A['guid'], A['sysid'], A.get('host', '52.66.28.201')
@@ -154,14 +154,22 @@ try:
           try:
               e, p = raw('get_leaderboards', fvar(1, 322))
               rows = parse_fields(parse_fields(p)[2][0])[1]
+              mine = (None, None)
+              top_out = ('?', 0)
               for k, r in enumerate(rows):
                   m = parse_fields(r)
+                  nm = m.get(2, [b''])[0]
+                  nm = nm.decode(errors='replace') if isinstance(nm, bytes) else str(nm)
+                  rt = m.get(4, [0])[0]
                   if m.get(1, [None])[0] == PID:
-                      rt = m.get(4, [0])[0]
-                      print('slot=%d ONBOARD rank=%d rating=%s target=%s' % (slot, k + 1, rt, target), flush=True)
-                      if target > 0 and isinstance(rt, int) and rt >= target:
-                          print('slot=%d TARGET %d REACHED STOPPING' % (slot, target), flush=True)
-                          raise _OnBoard()
+                      mine = (k + 1, rt)
+                  elif nm.lower() != 'fuck you kekki' and isinstance(rt, int) and rt > top_out[1]:
+                      top_out = (nm[:20], rt)
+              tgt = top_out[1] + GAP
+              print('slot=%d rank=%s rating=%s top-out=%s/%s target=%s' % (slot, mine[0], mine[1], top_out[0], top_out[1], tgt), flush=True)
+              if mine[0] is not None and isinstance(mine[1], int) and mine[1] >= tgt:
+                  print('slot=%d TARGET %d REACHED STOPPING' % (slot, tgt), flush=True)
+                  raise _OnBoard()
           except _OnBoard:
               raise
           except Exception as ex:

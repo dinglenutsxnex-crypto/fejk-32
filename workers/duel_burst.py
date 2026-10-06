@@ -86,46 +86,84 @@ t0 = time.time()
 if not connect_login():
     print('slot=%d LOGIN FAIL' % slot, flush=True)
     raise SystemExit(1)
+# resolve own player id once (for board matching)
+PID = None
+try:
+    s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
+    h = S.fstr(1, 'sum') + S.fstr(2, s)
+    e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5'))
+    top = parse_fields(p)
+    if 1 in top and isinstance(top[1][0], bytes):
+        inner = parse_fields(top[1][0])
+        sp = parse_fields(inner[1][0])
+        PID = sp[1][0]
+        print('slot=%d pid=%s' % (slot, PID), flush=True)
+except Exception as ex:
+    print('slot=%d pid-resolve fail %s' % (slot, str(ex)[:80]), flush=True)
 close_stale()
 wins = fails = 0
 i = 0
-while time.time() < T_END and (maxwins <= 0 or wins < maxwins):
-    i += 1
-    ok = False
-    for att in range(4):
-        try:
-            if i % 10 == 1 and att == 0:
-                try:
-                    c[0]._send('ping', ping_payload(sess[0]))
-                    c[0]._recv()
-                except Exception:
-                    pass
-            e, p = raw('brawler_start', None)
-            if e == 50003:
-                close_stale()
-                continue
-            if e is not None or not len(p):
-                if e is None:
-                    break
-                connect_login()
-                continue
-            blob = parse_fields(p)[1][0]
-            params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
-            e, pr = raw('brawler_finish', params)
-            if e is None and len(pr):
-                wins += 1
-                ok = True
-                break
-            connect_login()
-            break
-        except Exception:
-            connect_login()
-            continue
-    if not ok:
-        fails += 1
-    if i % 25 == 0:
-        el = int(time.time() - t0)
-        print('slot=%d duels=%d wins=%d fails=%d %ds left=%ds' % (slot, i, wins, fails, el, max(0, int(T_END - time.time()))), flush=True)
+last_board = 0
+
+
+class _OnBoard(Exception):
+    pass
+
+
+try:
+    while time.time() < T_END and (maxwins <= 0 or wins < maxwins):
+      i += 1
+      ok = False
+      for att in range(4):
+          try:
+              if i % 10 == 1 and att == 0:
+                  try:
+                      c[0]._send('ping', ping_payload(sess[0]))
+                      c[0]._recv()
+                  except Exception:
+                      pass
+              e, p = raw('brawler_start', None)
+              if e == 50003:
+                  close_stale()
+                  continue
+              if e is not None or not len(p):
+                  if e is None:
+                      break
+                  connect_login()
+                  continue
+              blob = parse_fields(p)[1][0]
+              params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
+              e, pr = raw('brawler_finish', params)
+              if e is None and len(pr):
+                  wins += 1
+                  ok = True
+                  break
+              connect_login()
+              break
+          except Exception:
+              connect_login()
+              continue
+      if not ok:
+          fails += 1
+      if i % 25 == 0:
+          el = int(time.time() - t0)
+          print('slot=%d duels=%d wins=%d fails=%d %ds left=%ds' % (slot, i, wins, fails, el, max(0, int(T_END - time.time()))), flush=True)
+      if PID is not None and int(time.time() - last_board) >= 60:
+          last_board = time.time()
+          try:
+              e, p = raw('get_leaderboards', fvar(1, 322))
+              rows = parse_fields(parse_fields(p)[2][0])[1]
+              for k, r in enumerate(rows):
+                  m = parse_fields(r)
+                  if m.get(1, [None])[0] == PID:
+                      print('slot=%d ONBOARD rank=%d rating=%s STOPPING' % (slot, k + 1, m.get(4, ['?'])[0]), flush=True)
+                      raise _OnBoard()
+          except _OnBoard:
+              raise
+          except Exception as ex:
+              print('slot=%d board-check fail %s' % (slot, str(ex)[:80]), flush=True)
+except _OnBoard:
+    print('slot=%d onboard, stopping early' % slot, flush=True)
 try:
     c[0].close()
 except Exception:

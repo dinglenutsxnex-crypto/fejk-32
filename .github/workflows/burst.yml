@@ -16,7 +16,7 @@ jobs:
   b:
     name: w${{ matrix.i }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 170
     strategy:
       fail-fast: false
       matrix:

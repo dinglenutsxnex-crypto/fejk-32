@@ -19,6 +19,14 @@ on:
         description: 'Seconds to sleep after each win (0 = full speed)'
         default: '0'
         required: false
+      jitter:
+        description: 'Extra random 0..N seconds after each duel (human timing)'
+        default: '0'
+        required: false
+      loss_every:
+        description: 'Lose every Nth duel (0 = always win)'
+        default: '0'
+        required: false
       file:
         description: 'Merged mint CSV in repo (default mint/mint-eu.csv)'
         default: 'mint/mint-eu.csv'
@@ -46,11 +54,13 @@ jobs:
           MAX_WINS: ${{ inputs.max_wins }}
           RATING_GAP: ${{ inputs.gap }}
           DUEL_PACE: ${{ inputs.pace }}
+          DUEL_JITTER: ${{ inputs.jitter }}
+          LOSS_EVERY: ${{ inputs.loss_every }}
         run: |
           set -o pipefail
           test -s "$CSV_FILE"
           NAMES=$(python3 -c "import csv,os;print(','.join(r['name'] for r in csv.DictReader(open(os.environ['CSV_FILE'])) if r.get('name')))")
-          FLEET_NAMES="$NAMES" python3 workers/duel_file.py --csv "$CSV_FILE" --index "$WORKER_INDEX" --minutes "$BURST_MINUTES" --max-wins "$MAX_WINS" --gap "$RATING_GAP" --pace "$DUEL_PACE" 2>&1 | tee "eu-${WORKER_INDEX}.log"
+          FLEET_NAMES="$NAMES" python3 workers/duel_file.py --csv "$CSV_FILE" --index "$WORKER_INDEX" --minutes "$BURST_MINUTES" --max-wins "$MAX_WINS" --gap "$RATING_GAP" --pace "$DUEL_PACE" --jitter "$DUEL_JITTER" --loss-every "$LOSS_EVERY" 2>&1 | tee "eu-${WORKER_INDEX}.log"
       - if: always()
         uses: actions/upload-artifact@v4
         with:

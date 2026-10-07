@@ -1,10 +1,11 @@
 """duel_file.py — duel grind for ONE account read from a mint CSV file.
 Same loop/failsafes as duel_burst.py (stuck-duel recovery, relogin,
 per-60s board stop at top-outsider+GAP). No secrets needed (CSV is the input).
-Usage: duel_file.py --file mint/eu-3.csv --minutes 15 [--max-wins 0] [--gap 50000] [--pace 0]
-(pace = seconds to sleep after each win; slows velocity to dodge flags)
+Usage: duel_file.py --file mint/eu-3.csv --minutes 15 [--max-wins 0] [--gap 50000] [--pace 0] [--jitter 0] [--loss-every 0]
+(pace+jitter slow velocity to dodge flags; loss-every N loses every Nth duel
+with a genuine-shaped loss so the account isn't a 100%-win metronome)
 """
-import sys, time, hashlib, json, os, csv
+import sys, time, hashlib, json, os, csv, random
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sf3 import Client, login_payload, envelope, send_frame, rd_frame, parse_fields, fvar, fbytes, ping_payload, D_SUM, CONFIG_VER
 import sf3 as S
@@ -25,6 +26,9 @@ minutes = float(arg('--minutes', '15'))
 maxwins = int(arg('--max-wins', '0'))
 gap = int(arg('--gap', str(GAP)))
 pace = float(arg('--pace', '0'))
+jitter = float(arg('--jitter', '0'))
+loss_every = int(arg('--loss-every', '0'))
+LOSS = None
 EXCLUDE = {name.strip().casefold() for name in os.environ.get('FLEET_NAMES', '').split(',') if name.strip()}
 if csvmulti is not None:
     with open(csvmulti, newline='', encoding='utf-8') as _fh:
@@ -114,6 +118,7 @@ except Exception as ex:
     print('pid-resolve fail %s' % str(ex)[:80], flush=True)
 close_stale()
 wins = fails = i = 0
+losses_around = 0
 consec_fail = 0
 last_board = 0
 try:
@@ -138,14 +143,24 @@ try:
                     connect_login()
                     continue
                 blob = parse_fields(p)[1][0]
-                params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
+                # Humanization: mostly 2-0 wins, every loss_every-th duel is a
+                # minimal genuine-shaped loss (duel_api sec 7). Identical
+                # always-win metronomes are what got the last fleet flagged.
+                is_loss = loss_every > 0 and (wins + losses_around) % loss_every == loss_every - 1
+                if is_loss:
+                    params = fbytes(1, blob) + fvar(2, 2) + fvar(3, 2)
+                else:
+                    params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
                 e, pr = raw('brawler_finish', params)
                 if e is None and len(pr):
-                    wins += 1
+                    if is_loss:
+                        losses_around += 1
+                    else:
+                        wins += 1
                     ok = True
                     consec_fail = 0
-                    if pace > 0:
-                        time.sleep(pace)
+                    if pace > 0 or jitter > 0:
+                        time.sleep(pace + random.uniform(0, jitter))
                     break
                 connect_login()
                 break
@@ -161,7 +176,7 @@ try:
             time.sleep(5)
         if i % 25 == 0:
             el = int(time.time() - t0)
-            print('duels=%d wins=%d fails=%d %ds left=%ds' % (i, wins, fails, el, max(0, int(T_END - time.time()))), flush=True)
+            print('duels=%d wins=%d losses=%d fails=%d %ds left=%ds' % (i, wins, losses_around, fails, el, max(0, int(T_END - time.time()))), flush=True)
         if PID is not None and int(time.time() - last_board) >= 60:
             last_board = time.time()
             try:
@@ -193,4 +208,4 @@ try:
     c[0].close()
 except Exception:
     pass
-print('DONE wins=%d fails=%d duels=%d wall=%ds file=%s' % (wins, fails, i, int(time.time() - t0), csvfile), flush=True)
+print('DONE wins=%d losses=%d fails=%d duels=%d wall=%ds file=%s' % (wins, losses_around, fails, i, int(time.time() - t0), csvfile), flush=True)

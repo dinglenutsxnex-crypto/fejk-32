@@ -23,7 +23,7 @@ jobs:
   mint:
     name: mint ${{ matrix.i }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,9 @@ jobs:
           if [ "$N" -gt "$LAST" ]; then echo "skip=1" >> "$GITHUB_OUTPUT"; else echo "skip=0" >> "$GITHUB_OUTPUT"; fi
           mkdir -p out
       - if: ${{ steps.prep.outputs.skip != '1' }}
-        run: python3 workers/mint_one.py --server ${{ inputs.server }} --out out/w-${{ matrix.i }}.csv 2>&1 | tee out-${{ matrix.i }}.log
+        run: |
+          set -o pipefail
+          python3 workers/mint_one.py --server ${{ inputs.server }} --out out/w-${{ matrix.i }}.csv 2>&1 | tee out-${{ matrix.i }}.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:

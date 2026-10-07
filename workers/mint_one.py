@@ -1,6 +1,6 @@
-"""mint_one.py — mint a duel-ready account: handshake/login/create_player,
-mini-chain (10,20,30,35,36 + spillover to 60 if brawler still locked),
-verify brawler open. Writes one CSV row. ~1 min.
+"""mint_one.py — mint a faction-ready account: handshake/login/create_player,
+full chain 10->270 (faction unlock at 270/lvl7) + faction select(3) +
+probe-duel verify. Writes one CSV row.
 Usage: mint_one.py --server eu --out mint/eu-3.csv [--name NXYZ]
 Servers: eu, us, tokyo, mumbai, sg (sg routes to Tokyo nodes).
 """
@@ -135,9 +135,10 @@ if e is not None or not len(p):
     print('MINT FAIL', flush=True)
     raise SystemExit(1)
 
-ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3}
+ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3, 70: 2, 80: 2, 90: 2, 95: 2, 100: 3, 150: 3, 210: 3, 270: 3}
+BATTLES = [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60, 70, 80, 90, 95, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270]
 unlocked = None
-for b in [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60]:
+for b in BATTLES:
     rounds = ROUNDS.get(b, 2)
     if b != 10:
         raw('refresh_single_battle', S.fvar(1, b))
@@ -180,17 +181,36 @@ for b in [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60]:
     be, bet, bp = raw('brawler_start', None)
     print('b%d fight=%s brawler=%s' % (b, e, be), flush=True)
     if be is None:
-        # close the probe duel immediately (finish WIN) so account is clean
+        # brawler open from 36 on; close the probe duel immediately so the
+        # account stays clean, but KEEP CHAINING to 270 (faction unlock).
         blob = parse_fields(bp)[1][0]
         WIN_STATS = bytes.fromhex('0802101f1a020101220209052a02010132080000803f0000803f3a08000000000000000042086666e63e6666e63e4a02030352020000')
         WIN_ITEMS = bytes.fromhex('0a0508d10c10040a0508d20c10040a0508d93410020a0508dc341002')
         RENT = [bytes.fromhex(s) for s in ('08031001', '08041002', '08051003', '08061002', '0807')]
         params = (S.fbytes(1, blob) + S.fvar(2, 1) + S.fvar(3, 2) + b''.join(S.fbytes(4, x) for x in RENT) + S.fvar(5, 2) + S.fbytes(6, WIN_ITEMS) + S.fbytes(7, WIN_STATS))
         fe, fet, fp = raw('brawler_finish', params)
-        print('probe-duel closed err=%s UNLOCKED AT %d' % (fe, b), flush=True)
-        unlocked = b
-        break
+        print('probe-duel closed err=%s at %d' % (fe, b), flush=True)
+        if unlocked is None:
+            unlocked = b
     time.sleep(0.5)
+# faction select (required: locked 1200005 until 270/lvl7)
+raw('process_finished_features', b'')
+se, set_, _ = raw('faction_wars_start_new_stage', b'')
+print('start_new_stage err=%s' % se, flush=True)
+raw('quest_refresh', bytes.fromhex('0a0107'))
+ce, cet, _ = raw('faction_wars_choose_faction', S.fvar(1, 3))
+print('choose_faction(3) err=%s %s' % (ce, cet[:80]), flush=True)
+fe, fet, fpay = raw('faction_wars_get_state', b'')
+sel = None
+try:
+    _m = parse_fields(fpay)
+    if 4 in _m and isinstance(_m[4][0], bytes):
+        sel = parse_fields(_m[4][0]).get(1, [None])[0]
+except Exception:
+    pass
+print('faction selected=%s err=%s' % (sel, fe), flush=True)
+if sel != 3:
+    print('MINT WARN faction select != 3 (locked?)', flush=True)
 d = os.path.dirname(os.path.abspath(out))
 os.makedirs(d, exist_ok=True)
 with open(out, 'w') as fh:

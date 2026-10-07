@@ -18,16 +18,24 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 csvfile = arg('--file')
-csvmulti = arg('--csv', None)
+csvmulti = arg('--csv')
 csvidx = int(arg('--index', '0'))
+minutes = float(arg('--minutes', '15'))
+maxwins = int(arg('--max-wins', '0'))
+gap = int(arg('--gap', str(GAP)))
+EXCLUDE = {name.strip().casefold() for name in os.environ.get('FLEET_NAMES', '').split(',') if name.strip()}
 if csvmulti is not None:
-    import csv as _csv
     with open(csvmulti, newline='', encoding='utf-8') as _fh:
-        _rows = [rr for rr in _csv.DictReader(_fh) if rr.get('guid')]
-    row = _rows[csvidx % len(_rows)]
+        _rows = [rr for rr in csv.DictReader(_fh) if rr.get('guid')]
+    if not 0 <= csvidx < len(_rows):
+        raise SystemExit('CSV row index %d out of range (rows=%d)' % (csvidx, len(_rows)))
+    row = _rows[csvidx]
     csvfile = '%s#%d' % (csvmulti, csvidx)
 else:
-    row = list(__import__('csv').DictReader(open(csvfile)))[0]
+    if not csvfile:
+        raise SystemExit('pass --csv FILE --index N or --file FILE')
+    with open(csvfile, newline='', encoding='utf-8') as _fh:
+        row = next(csv.DictReader(_fh))
 GUID, SYSID, HOST = row['guid'], row['sysid'], row['host']
 T_END = time.time() + minutes * 60
 

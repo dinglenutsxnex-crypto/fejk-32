@@ -35,9 +35,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Run duel worker on merged CSV row
+        env:
+          CSV_FILE: ${{ inputs.file }}
+          WORKER_INDEX: ${{ matrix.i }}
+          BURST_MINUTES: ${{ inputs.minutes }}
+          MAX_WINS: ${{ inputs.max_wins }}
+          RATING_GAP: ${{ inputs.gap }}
         run: |
-          NAMES=$(python3 -c "import csv;print(','.join(r['name'] for r in csv.DictReader(open('${{ inputs.file }}')) if r.get('name')))")
-          FLEET_NAMES="$NAMES" python3 workers/duel_file.py --csv "${{ inputs.file }}" --index ${{ matrix.i }} --minutes ${{ inputs.minutes }} --max-wins ${{ inputs.max_wins }} --gap ${{ inputs.gap }} 2>&1 | tee eu-${{ matrix.i }}.log
+          set -o pipefail
+          test -s "$CSV_FILE"
+          NAMES=$(python3 -c "import csv,os;print(','.join(r['name'] for r in csv.DictReader(open(os.environ['CSV_FILE'])) if r.get('name')))")
+          FLEET_NAMES="$NAMES" python3 workers/duel_file.py --csv "$CSV_FILE" --index "$WORKER_INDEX" --minutes "$BURST_MINUTES" --max-wins "$MAX_WINS" --gap "$RATING_GAP" 2>&1 | tee "eu-${WORKER_INDEX}.log"
       - if: always()
         uses: actions/upload-artifact@v4
         with:

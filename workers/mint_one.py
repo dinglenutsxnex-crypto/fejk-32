@@ -191,6 +191,8 @@ for b in [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60]:
         unlocked = b
         break
     time.sleep(0.5)
+d = os.path.dirname(os.path.abspath(out))
+os.makedirs(d, exist_ok=True)
 with open(out, 'w') as fh:
     fh.write('name,guid,sysid,host\n')
     fh.write('%s,%s,%s,%s\n' % (name, guid, sysid, HOST))

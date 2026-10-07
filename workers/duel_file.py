@@ -18,11 +18,16 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 csvfile = arg('--file')
-minutes = float(arg('--minutes', '15'))
-maxwins = int(arg('--max-wins', '0'))
-gap = int(arg('--gap', str(GAP)))
-EXCLUDE = set(n.strip().lower() for n in os.environ.get('FLEET_NAMES', '').split(',') if n.strip())
-row = list(csv.DictReader(open(csvfile)))[0]
+csvmulti = arg('--csv', None)
+csvidx = int(arg('--index', '0'))
+if csvmulti is not None:
+    import csv as _csv
+    with open(csvmulti, newline='', encoding='utf-8') as _fh:
+        _rows = [rr for rr in _csv.DictReader(_fh) if rr.get('guid')]
+    row = _rows[csvidx % len(_rows)]
+    csvfile = '%s#%d' % (csvmulti, csvidx)
+else:
+    row = list(__import__('csv').DictReader(open(csvfile)))[0]
 GUID, SYSID, HOST = row['guid'], row['sysid'], row['host']
 T_END = time.time() + minutes * 60
 

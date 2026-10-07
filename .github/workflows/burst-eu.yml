@@ -15,6 +15,10 @@ on:
         description: 'Stop at top-outsider + this rating'
         default: '50000'
         required: false
+      file:
+        description: 'Merged mint CSV in repo (default mint/mint-eu.csv)'
+        default: 'mint/mint-eu.csv'
+        required: false
 
 jobs:
   b:
@@ -30,13 +34,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run duel worker on mint file
-        env:
-          FLEET_NAMES: ${{ vars.FLEET_NAMES_EU }}
+      - name: Run duel worker on merged CSV row
         run: |
-          F="mint/eu-$(( ${{ matrix.i }} + 1 )).csv"
-          if [ ! -f "$F" ]; then echo "no $F, skipping"; exit 0; fi
-          python3 workers/duel_file.py --file "$F" --minutes ${{ inputs.minutes }} --max-wins ${{ inputs.max_wins }} --gap ${{ inputs.gap }} 2>&1 | tee eu-${{ matrix.i }}.log
+          NAMES=$(python3 -c "import csv;print(','.join(r['name'] for r in csv.DictReader(open('${{ inputs.file }}')) if r.get('name')))")
+          FLEET_NAMES="$NAMES" python3 workers/duel_file.py --csv "${{ inputs.file }}" --index ${{ matrix.i }} --minutes ${{ inputs.minutes }} --max-wins ${{ inputs.max_wins }} --gap ${{ inputs.gap }} 2>&1 | tee eu-${{ matrix.i }}.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:

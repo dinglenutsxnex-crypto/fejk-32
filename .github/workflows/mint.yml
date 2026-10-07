@@ -12,7 +12,7 @@ on:
         default: '100'
         required: true
       start:
-        description: 'Numbering starts at start+1 (mint-<server>-N.csv)'
+        description: 'Numbering offset (files keep stable order, merged by guid)'
         default: '0'
         required: false
 
@@ -39,16 +39,17 @@ jobs:
           LAST=$(( ${{ inputs.start }} + ${{ inputs.count }} ))
           echo "n=$N" >> "$GITHUB_OUTPUT"
           if [ "$N" -gt "$LAST" ]; then echo "skip=1" >> "$GITHUB_OUTPUT"; else echo "skip=0" >> "$GITHUB_OUTPUT"; fi
+          mkdir -p out
       - if: ${{ steps.prep.outputs.skip != '1' }}
-        run: python3 workers/mint_one.py --server ${{ inputs.server }} --out mint/${{ inputs.server }}-${{ steps.prep.outputs.n }}.csv 2>&1 | tee mint-${{ matrix.i }}.log
+        run: python3 workers/mint_one.py --server ${{ inputs.server }} --out out/w-${{ matrix.i }}.csv 2>&1 | tee out-${{ matrix.i }}.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mint-${{ matrix.i }}
           if-no-files-found: ignore
           path: |
-            mint/${{ inputs.server }}-${{ steps.prep.outputs.n }}.csv
-            mint-${{ matrix.i }}.log
+            out/w-${{ matrix.i }}.csv
+            out-${{ matrix.i }}.log
           retention-days: 7
 
   commit:
@@ -58,16 +59,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
           pattern: mint-*
           merge-multiple: true
-          path: mint/
+          path: staging/
+      - run: python3 workers/merge_mint.py --server ${{ inputs.server }} --glob 'staging/**/w-*.csv' --out mint/mint-${{ inputs.server }}.csv
       - run: |
           git config user.email "farm@local"
           git config user.name "farm"
-          find mint -name '*.csv' -exec mv -n {} mint/ \; 2>/dev/null || true
-          rm -f mint/*.log
           git add 'mint/*.csv'
-          git diff --cached --quiet || git commit -m "mint ${{ inputs.count }} accounts on ${{ inputs.server }}"
+          git diff --cached --quiet && echo 'nothing new' || git commit -m "mint ${{ inputs.server }} accounts"
           git push

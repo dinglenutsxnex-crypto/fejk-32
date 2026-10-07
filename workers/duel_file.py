@@ -1,7 +1,8 @@
 """duel_file.py — duel grind for ONE account read from a mint CSV file.
 Same loop/failsafes as duel_burst.py (stuck-duel recovery, relogin,
 per-60s board stop at top-outsider+GAP). No secrets needed (CSV is the input).
-Usage: duel_file.py --file mint/eu-3.csv --minutes 15 [--max-wins 0] [--gap 50000]
+Usage: duel_file.py --file mint/eu-3.csv --minutes 15 [--max-wins 0] [--gap 50000] [--pace 0]
+(pace = seconds to sleep after each win; slows velocity to dodge flags)
 """
 import sys, time, hashlib, json, os, csv
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +24,7 @@ csvidx = int(arg('--index', '0'))
 minutes = float(arg('--minutes', '15'))
 maxwins = int(arg('--max-wins', '0'))
 gap = int(arg('--gap', str(GAP)))
+pace = float(arg('--pace', '0'))
 EXCLUDE = {name.strip().casefold() for name in os.environ.get('FLEET_NAMES', '').split(',') if name.strip()}
 if csvmulti is not None:
     with open(csvmulti, newline='', encoding='utf-8') as _fh:
@@ -112,6 +114,7 @@ except Exception as ex:
     print('pid-resolve fail %s' % str(ex)[:80], flush=True)
 close_stale()
 wins = fails = i = 0
+consec_fail = 0
 last_board = 0
 try:
     while time.time() < T_END and (maxwins <= 0 or wins < maxwins):
@@ -140,6 +143,9 @@ try:
                 if e is None and len(pr):
                     wins += 1
                     ok = True
+                    consec_fail = 0
+                    if pace > 0:
+                        time.sleep(pace)
                     break
                 connect_login()
                 break
@@ -148,6 +154,11 @@ try:
                 continue
         if not ok:
             fails += 1
+            consec_fail += 1
+            if consec_fail >= 15:
+                print('WEDGED %d consecutive fails (account flagged?); giving up slot' % consec_fail, flush=True)
+                break
+            time.sleep(5)
         if i % 25 == 0:
             el = int(time.time() - t0)
             print('duels=%d wins=%d fails=%d %ds left=%ds' % (i, wins, fails, el, max(0, int(T_END - time.time()))), flush=True)

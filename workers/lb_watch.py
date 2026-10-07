@@ -82,7 +82,7 @@ try:
                 h = S.fstr(1, 'sum') + S.fstr(2, s)
                 pid, wins = None, 0
                 for _ in range(3):
-                    ee, pp = raw(cc, 'get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5'))
+                    ee, pp = raw(cc, 'get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
                     top = parse_fields(pp) if pp else {}
                     if ee is None and 1 in top and isinstance(top[1][0], bytes):
                         inner = parse_fields(top[1][0])

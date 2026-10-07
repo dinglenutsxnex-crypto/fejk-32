@@ -125,7 +125,7 @@ def relogin():
 def bare():
     s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
     h = S.fstr(1, 'sum') + S.fstr(2, s)
-    e, et, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5'))
+    e, et, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
     if e is not None or not len(p):
         return None
     top = parse_fields(p)
@@ -161,7 +161,7 @@ def submit_fight(b, st0, E, decl, f6, rounds, via):
     if via == 'gp':
         sv2 = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
         hh = S.fstr(1, 'sum') + S.fstr(2, sv2)
-        pay = S.fstr(1, CONFIG_VER) + S.fbytes(2, S.fbytes(1, entry) + S.fbytes(2, state)) + S.fbytes(3, hh) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5')
+        pay = S.fstr(1, CONFIG_VER) + S.fbytes(2, S.fbytes(1, entry) + S.fbytes(2, state)) + S.fbytes(3, hh) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER)
         e, _, _ = raw('get_player', pay)
     else:
         e, _, _ = raw('process_offline_batch', S.fbytes(1, entry) + S.fbytes(2, state))

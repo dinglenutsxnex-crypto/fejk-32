@@ -76,7 +76,7 @@ def close_stale():
     try:
         s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
         h = S.fstr(1, 'sum') + S.fstr(2, s)
-        e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5'))
+        e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
         if e is not None or not len(p):
             return False
         top = parse_fields(p)
@@ -101,7 +101,7 @@ if not connect_login():
     raise SystemExit(1)
 s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
 h = S.fstr(1, 'sum') + S.fstr(2, s)
-e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5'))
+e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
 PID = None
 try:
     top = parse_fields(p)

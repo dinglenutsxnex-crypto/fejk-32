@@ -19,7 +19,7 @@ Proven create_player sequence from pcapng captures:
   -> create_player -> SUCCESS
 
 Fingerprint:
-  sum      = SHA1hex(session + "9C4483BC").upper()   [static for 1.45.5 APK]
+  sum      = SHA1hex(session + "8C6002E8").upper()   [static for 1.46.0 APK]
   net_data = SHA1hex(session + "2137978293").upper() [static D2]
 """
 
@@ -37,9 +37,9 @@ import sys
 # constants
 APP_ID = "com.nekki.shadowfight3"
 BNAME = "UnityClient_ShadowFight3_UnityClientShadowFight3Release_ConfigurationAndroid"
-V = "19217"
-CONFIG_VER = "1.45.0.175.16722-prod"
-APP_VER = "1.45.5"
+V = "19221"
+CONFIG_VER = "1.46.0.10.16731-prod"
+APP_VER = "1.46.0"
 # Static APK-signing-cert hash (Nekki upload cert, RSA-1024, from the .apks
 # v2/v3 block). Login extData `f` = SHA1hex(session + X_CERT).upper().
 # Verified 7/7 against real captures. Server validates it at
@@ -48,9 +48,9 @@ X_CERT = "D61109D768EDAA3AD2EFA9EF357BD1AE33D5F0AB"
 # Static file-integrity value behind hashes["sum"]:
 # hex8(CRC32(LE32(CRC32(libil2cpp.so)) + LE32(classes.dex CRCs sorted))).
 # Verified against 5 real (session, sum) pairs.
-D_SUM = "9C4483BC"
+D_SUM = "8C6002E8"
 SYSID_REAL = "3a95c987d48cb3ee"
-D_SUM      = "9C4483BC"
+D_SUM      = "8C6002E8"
 D2_NET     = "2137978293"
 
 
@@ -388,7 +388,7 @@ def run_create_player(host, name="NEXO", use_tls=True):
     c.send_log([{"type": "OPEN_ERROR_WINDOW", "errorType": "UNKNOWN_ERROR",
                  "etype": "BUNDLE_EVENT", "cid": 10, "pl": 1,
                  "cts": now + 1000, "plf": "Android",
-                 "v": "1.45.0.175", "fv": CONFIG_VER,
+                 "v": "1.46.0.0", "fv": CONFIG_VER,
                  "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg}])
 
     # pings x4
@@ -403,13 +403,13 @@ def run_create_player(host, name="NEXO", use_tls=True):
          "TotalSize": 0.0, "TotalExtracted": 0, "TotalExtractedSize": 0.0,
          "TotalTime": 35.157, "Speed": 0.0, "CDN": "https://omzu2og9jo.a.trbcdn.net",
          "etype": "BUNDLE_DOWNLOAD", "cid": 11, "pl": 1,
-         "cts": now + 35000, "plf": "Android", "v": "1.45.0.175", "fv": CONFIG_VER,
+         "cts": now + 35000, "plf": "Android", "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg},
         {"Errors": {}, "TotalErrors": 0, "TotalSuccess": 0, "Finish": False,
          "TotalSize": 0.0, "TotalExtracted": 0, "TotalExtractedSize": 0.0,
          "TotalTime": 36.657, "Speed": 0.0, "CDN": "https://omzu2og9jo.a.trbcdn.net",
          "etype": "BUNDLE_DOWNLOAD", "cid": 12, "pl": 1,
-         "cts": now + 36500, "plf": "Android", "v": "1.45.0.175", "fv": CONFIG_VER,
+         "cts": now + 36500, "plf": "Android", "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg}
     ])
 
@@ -423,11 +423,11 @@ def run_create_player(host, name="NEXO", use_tls=True):
     c.send_log([
         {"type": "BUNDLES_LOADED", "etype": "BUNDLE_EVENT",
          "cid": 13, "pl": 1, "cts": now + 50000, "plf": "Android",
-         "v": "1.45.0.175", "fv": CONFIG_VER,
+         "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg},
         {"type": "START_EXTRACT_BUNDLES", "etype": "BUNDLE_EVENT",
          "cid": 14, "pl": 1, "cts": now + 50100, "plf": "Android",
-         "v": "1.45.0.175", "fv": CONFIG_VER,
+         "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg}
     ])
 
@@ -444,13 +444,13 @@ def run_create_player(host, name="NEXO", use_tls=True):
     c.send_log([
         {"type": "END_EXTRACT_BUNDLES", "etype": "BUNDLE_EVENT",
          "cid": 15, "pl": 1, "cts": now + 57000, "plf": "Android",
-         "v": "1.45.0.175", "fv": CONFIG_VER,
+         "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg},
         {"Errors": {}, "TotalErrors": 0, "TotalSuccess": 1, "Finish": True,
          "TotalSize": 78.217, "TotalExtracted": 14, "TotalExtractedSize": 153.277,
          "TotalTime": 56.931, "Speed": 1.374, "CDN": "https://omzu2og9jo.a.trbcdn.net",
          "etype": "BUNDLE_DOWNLOAD", "cid": 16, "pl": 1,
-         "cts": now + 57100, "plf": "Android", "v": "1.45.0.175", "fv": CONFIG_VER,
+         "cts": now + 57100, "plf": "Android", "v": "1.46.0.0", "fv": CONFIG_VER,
          "sid": 0, "onl": False, "md": "VideoPlayer", "creg": creg}
     ])
 

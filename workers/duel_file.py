@@ -49,40 +49,66 @@ c = [None]
 sess = [None]
 
 def connect_login():
+    # Never throws: False means dead route, caller decides (retry/exit).
     if c[0] is not None:
         try:
             c[0].close()
         except Exception:
             pass
-    c[0] = Client(HOST, timeout=15)
-    c[0].handshake()
-    print('egress-node=%s' % (c[0].node if hasattr(c[0], 'node') else '?'), flush=True)
-    sess[0] = c[0].session
-    fv = hashlib.sha1((sess[0] + X).encode()).hexdigest().upper()
-    pw = hashlib.md5((sess[0] + GUID).encode()).hexdigest()
-    c[0].req = 0
-    c[0]._send('LOGIN', login_payload(GUID, pw, SYSID, fv))
-    err = c[0]._recv().get(4, [None])[0]
-    c[0].drain(timeout=2)
-    return err is None
+    try:
+        c[0] = Client(HOST, timeout=15)
+        c[0].handshake()
+        print('egress-node=%s' % (c[0].node if hasattr(c[0], 'node') else '?'), flush=True)
+        sess[0] = c[0].session
+        fv = hashlib.sha1((sess[0] + X).encode()).hexdigest().upper()
+        pw = hashlib.md5((sess[0] + GUID).encode()).hexdigest()
+        c[0].req = 0
+        c[0]._send('LOGIN', login_payload(GUID, pw, SYSID, fv))
+        err = c[0]._recv().get(4, [None])[0]
+        c[0].drain(timeout=2)
+        return err is None
+    except Exception as ex:
+        print('connect fail %s' % str(ex)[:100], flush=True)
+        return False
+
+def relogin():
+    for _ in range(3):
+        if connect_login():
+            return True
+        time.sleep(5)
+    return False
 
 def raw(cmd, pay=None):
-    c[0].req += 1
-    send_frame(c[0].s, envelope(c[0].req, cmd, pay))
-    o = c[0].s.gettimeout(); c[0].s.settimeout(14)
+    # Never throws: transport drops come back as 999 so the caller can
+    # reinitialize the connection instead of dying mid-run.
+    try:
+        c[0].req += 1
+        send_frame(c[0].s, envelope(c[0].req, cmd, pay))
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
+    o = c[0].s.gettimeout()
+    try:
+        c[0].s.settimeout(14)
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
     try:
         _, fb = rd_frame(c[0].s)
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
     finally:
-        c[0].s.settimeout(o)
+        try:
+            c[0].s.settimeout(o)
+        except Exception:
+            pass
     f = parse_fields(fb)
     e = f.get(4, [None])[0]
-    return e, (f.get(3, [b''])[0] if 3 in f else b'')
+    return e, (f.get(3, [b''])[0] if 3 in f else b''), b''
 
 def close_stale():
     try:
         s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
         h = S.fstr(1, 'sum') + S.fstr(2, s)
-        e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
+        e, p, _ = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
         if e is not None or not len(p):
             return False
         top = parse_fields(p)
@@ -93,7 +119,7 @@ def close_stale():
             return True
         blob = parse_fields(inner[13][0])[1][0]
         params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
-        e, pr = raw('brawler_finish', params)
+        e, pr, _ = raw('brawler_finish', params)
         return e is None
     except Exception:
         return False
@@ -102,20 +128,33 @@ class _OnBoard(Exception):
     pass
 
 t0 = time.time()
-if not connect_login():
-    print('LOGIN FAIL %s' % csvfile, flush=True)
+if not relogin():
+    print('LOGIN FAIL %s (route dead after retries)' % csvfile, flush=True)
     raise SystemExit(1)
-s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
-h = S.fstr(1, 'sum') + S.fstr(2, s)
-e, p = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
 PID = None
-try:
-    top = parse_fields(p)
-    if 1 in top and isinstance(top[1][0], bytes):
-        PID = parse_fields(parse_fields(top[1][0])[1][0])[1][0]
-        print('pid=%s' % PID, flush=True)
-except Exception as ex:
-    print('pid-resolve fail %s' % str(ex)[:80], flush=True)
+for _ in range(3):
+    s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
+    h = S.fstr(1, 'sum') + S.fstr(2, s)
+    e, p, _ = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
+    if e == 999:
+        if not relogin():
+            break
+        continue
+    try:
+        top = parse_fields(p)
+        if 1 in top and isinstance(top[1][0], bytes):
+            PID = parse_fields(parse_fields(top[1][0])[1][0])[1][0]
+            print('pid=%s' % PID, flush=True)
+            break
+    except Exception as ex:
+        print('pid-resolve fail %s' % str(ex)[:80], flush=True)
+        break
+    print('pid-resolve empty (e=%s); relogin' % e, flush=True)
+    if not relogin():
+        break
+if PID is None:
+    print('PID FAIL %s (account flagged? route dead?)' % csvfile, flush=True)
+    raise SystemExit(1)
 close_stale()
 wins = fails = i = 0
 losses_around = 0
@@ -125,24 +164,35 @@ try:
     while time.time() < T_END and (maxwins <= 0 or wins < maxwins):
         i += 1
         ok = False
-        for att in range(4):
+        for att in range(3):
+            if i % 10 == 1 and att == 0:
+                try:
+                    c[0]._send('ping', ping_payload(sess[0]))
+                    c[0]._recv()
+                except Exception:
+                    pass
+            e, p, _ = raw('brawler_start', None)
+            if e == 999:
+                # Drop before the server saw anything: fresh session, redo once.
+                if not relogin():
+                    break
+                e, p, _ = raw('brawler_start', None)
+                if e == 999:
+                    break
+            if e == 50003:
+                close_stale()
+                time.sleep(2)
+                continue
+            if e is not None or not len(p):
+                if e is None:
+                    break
+                if not relogin():
+                    break
+                continue
             try:
-                if i % 10 == 1 and att == 0:
-                    try:
-                        c[0]._send('ping', ping_payload(sess[0]))
-                        c[0]._recv()
-                    except Exception:
-                        pass
-                e, p = raw('brawler_start', None)
-                if e == 50003:
-                    close_stale()
-                    continue
-                if e is not None or not len(p):
-                    if e is None:
-                        break
-                    connect_login()
-                    continue
                 blob = parse_fields(p)[1][0]
+            except Exception:
+                break
                 # Humanization: mostly 2-0 wins, every loss_every-th duel is a
                 # minimal genuine-shaped loss (duel_api sec 7). Identical
                 # always-win metronomes are what got the last fleet flagged.
@@ -151,7 +201,22 @@ try:
                     params = fbytes(1, blob) + fvar(2, 2) + fvar(3, 2)
                 else:
                     params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
-                e, pr = raw('brawler_finish', params)
+                e, pr, _ = raw('brawler_finish', params)
+                if e == 999:
+                    if not relogin():
+                        break
+                    e, pr, _ = raw('brawler_start', None)
+                    if e == 999 or e is not None or not len(pr):
+                        break
+                    try:
+                        blob = parse_fields(pr)[1][0]
+                    except Exception:
+                        break
+                    if is_loss:
+                        params = fbytes(1, blob) + fvar(2, 2) + fvar(3, 2)
+                    else:
+                        params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
+                    e, pr, _ = raw('brawler_finish', params)
                 if e is None and len(pr):
                     if is_loss:
                         losses_around += 1
@@ -162,10 +227,14 @@ try:
                     if pace > 0 or jitter > 0:
                         time.sleep(pace + random.uniform(0, jitter))
                     break
-                connect_login()
+                if not relogin():
+                    break
                 break
-            except Exception:
-                connect_login()
+            except Exception as ex:
+                print('duel EXC %s; relogin' % str(ex)[:80], flush=True)
+                if not relogin():
+                    break
+                time.sleep(2)
                 continue
         if not ok:
             fails += 1
@@ -179,25 +248,30 @@ try:
             print('duels=%d wins=%d losses=%d fails=%d %ds left=%ds' % (i, wins, losses_around, fails, el, max(0, int(T_END - time.time()))), flush=True)
         if PID is not None and int(time.time() - last_board) >= 60:
             last_board = time.time()
+            # Read-only: NEVER reconnect here. A dead board read must not
+            # disturb a healthy duel session (that was the handshake spam).
             try:
-                e, p = raw('get_leaderboards', fvar(1, 322))
-                rows = parse_fields(parse_fields(p)[2][0])[1]
-                mine = (None, None)
-                top_out = ('?', 0)
-                for k, r in enumerate(rows):
-                    m = parse_fields(r)
-                    nm = m.get(2, [b''])[0]
-                    nm = nm.decode(errors='replace') if isinstance(nm, bytes) else str(nm)
-                    rt = m.get(4, [0])[0]
-                    if m.get(1, [None])[0] == PID:
-                        mine = (k + 1, rt)
-                    elif nm.lower() not in EXCLUDE and isinstance(rt, int) and rt > top_out[1]:
-                        top_out = (nm[:20].encode('ascii', 'replace').decode(), rt)
-                tgt = top_out[1] + gap
-                print('rank=%s rating=%s top-out=%s/%s target=%s' % (mine[0], mine[1], top_out[0], top_out[1], tgt), flush=True)
-                if mine[0] is not None and isinstance(mine[1], int) and mine[1] >= tgt:
-                    print('TARGET %d REACHED STOPPING' % tgt, flush=True)
-                    raise _OnBoard()
+                e, p, _ = raw('get_leaderboards', fvar(1, 322))
+                if e == 999 or e is not None or not len(p):
+                    print('board-check skip (e=%s)' % e, flush=True)
+                else:
+                    rows = parse_fields(parse_fields(p)[2][0])[1]
+                    mine = (None, None)
+                    top_out = ('?', 0)
+                    for k, r in enumerate(rows):
+                        m = parse_fields(r)
+                        nm = m.get(2, [b''])[0]
+                        nm = nm.decode(errors='replace') if isinstance(nm, bytes) else str(nm)
+                        rt = m.get(4, [0])[0]
+                        if m.get(1, [None])[0] == PID:
+                            mine = (k + 1, rt)
+                        elif nm.lower() not in EXCLUDE and isinstance(rt, int) and rt > top_out[1]:
+                            top_out = (nm[:20].encode('ascii', 'replace').decode(), rt)
+                    tgt = top_out[1] + gap
+                    print('rank=%s rating=%s top-out=%s/%s target=%s' % (mine[0], mine[1], top_out[0], top_out[1], tgt), flush=True)
+                    if mine[0] is not None and isinstance(mine[1], int) and mine[1] >= tgt:
+                        print('TARGET %d REACHED STOPPING' % tgt, flush=True)
+                        raise _OnBoard()
             except _OnBoard:
                 raise
             except Exception as ex:

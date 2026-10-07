@@ -24,7 +24,7 @@ jobs:
   b:
     name: eu-${{ matrix.i }}
     runs-on: ubuntu-latest
-    timeout-minutes: 170
+    timeout-minutes: 420
     strategy:
       fail-fast: false
       matrix:

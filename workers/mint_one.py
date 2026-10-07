@@ -1,6 +1,7 @@
 """mint_one.py — mint a faction-ready account: handshake/login/create_player,
-full chain 10->270 (faction unlock at 270/lvl7) + faction select(3) +
-probe-duel verify. Writes one CSV row.
+full chain 10->420 (chapter 3, proven sufficient per FINAL_REPORT sec 8;
+ch3farm.py / ch3worker.py STOP_AT=420) + faction select(3) + probe-duel
+verify. Writes one CSV row.
 Usage: mint_one.py --server eu --out mint/eu-3.csv [--name NXYZ]
 Servers: eu, us, tokyo, mumbai, sg (sg routes to Tokyo nodes).
 """
@@ -135,8 +136,8 @@ if e is not None or not len(p):
     print('MINT FAIL', flush=True)
     raise SystemExit(1)
 
-ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3, 70: 2, 80: 2, 90: 2, 95: 2, 100: 3, 150: 3, 210: 3, 270: 3}
-BATTLES = [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60, 70, 80, 90, 95, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270]
+ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3, 70: 2, 80: 2, 90: 2, 95: 2, 100: 3, 150: 3, 210: 3, 270: 3, 320: 3, 370: 3, 420: 3}
+BATTLES = [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60, 70, 80, 90, 95, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350, 360, 370, 380, 390, 400, 410, 420]
 unlocked = None
 for b in BATTLES:
     rounds = ROUNDS.get(b, 2)
@@ -193,7 +194,7 @@ for b in BATTLES:
         if unlocked is None:
             unlocked = b
     time.sleep(0.5)
-# faction select (required: locked 1200005 until 270/lvl7)
+# faction select (required: chapter-3 account per ch3farm.py/ch3worker.py STOP_AT=420)
 raw('process_finished_features', b'')
 se, set_, _ = raw('faction_wars_start_new_stage', b'')
 print('start_new_stage err=%s' % se, flush=True)

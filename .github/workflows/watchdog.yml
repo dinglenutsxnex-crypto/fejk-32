@@ -1,8 +1,6 @@
-name: watchdog (keep bursts running until board is ours)
+name: watchdog (disabled - manual bursts only)
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:

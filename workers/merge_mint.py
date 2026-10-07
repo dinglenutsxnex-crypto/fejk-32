@@ -42,6 +42,9 @@ for fp in files:
     except Exception as ex:
         print('skip %s: %s' % (fp, str(ex)[:80]), flush=True)
 os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+if not seen:
+    print('NO ROWS merged; refusing to write empty %s' % out, flush=True)
+    raise SystemExit(1)
 with open(out, 'w', newline='', encoding='utf-8') as fh:
     w = csv.DictWriter(fh, fieldnames=['name', 'guid', 'sysid', 'host'])
     w.writeheader()

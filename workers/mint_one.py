@@ -32,6 +32,9 @@ GEN = {
 }
 SRC45 = {'f8': [(1, 8), (2, 3), (3, 3), (4, 2), (5, 4), (6, None), (7, None)], 'f13': '083610551a021e18220226202a026d653208432b183f52387d3f3a080000000000000000420860d10a3e68ee723e4a02101352020501'}
 CAP = {1: lambda r: 50 * r, 2: lambda r: 5 * r, 3: lambda r: 50 * r, 4: lambda r: 1 * r, 5: lambda r: 50, 6: lambda r: 1 * r, 7: lambda r: 1 * r}
+WIN_STATS = bytes.fromhex('0802101f1a020101220209052a02010132080000803f0000803f3a08000000000000000042086666e63e6666e63e4a02030352020000')
+WIN_ITEMS = bytes.fromhex('0a0508d10c10040a0508d20c10040a0508d93410020a0508dc341002')
+RENT = [bytes.fromhex(s) for s in ('08031001', '08041002', '08051003', '08061002', '0807')]
 
 def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
@@ -61,33 +64,63 @@ def connect_login(guid=None, sysid=None):
             c[0].close()
         except Exception:
             pass
-    c[0] = Client(HOST, timeout=15)
-    c[0].handshake()
+    try:
+        c[0] = Client(HOST, timeout=15)
+        c[0].handshake()
+    except Exception as ex:
+        print('connect fail %s' % str(ex)[:100], flush=True)
+        return False
     sess[0] = c[0].session
     if guid is None:
         return True
-    fv = hashlib.sha1((sess[0] + X).encode()).hexdigest().upper()
-    pw = hashlib.md5((sess[0] + guid).encode()).hexdigest()
-    c[0].req = 0
-    c[0]._send('LOGIN', login_payload(guid, pw, sysid, fv))
-    err = c[0]._recv().get(4, [None])[0]
-    c[0].drain(timeout=2)
-    return err is None
+    try:
+        fv = hashlib.sha1((sess[0] + X).encode()).hexdigest().upper()
+        pw = hashlib.md5((sess[0] + guid).encode()).hexdigest()
+        c[0].req = 0
+        c[0]._send('LOGIN', login_payload(guid, pw, sysid, fv))
+        err = c[0]._recv().get(4, [None])[0]
+        c[0].drain(timeout=2)
+        return err is None
+    except Exception as ex:
+        print('login fail %s' % str(ex)[:100], flush=True)
+        return False
 
 def raw(cmd, pay=None):
-    c[0].req += 1
-    send_frame(c[0].s, envelope(c[0].req, cmd, pay))
-    o = c[0].s.gettimeout(); c[0].s.settimeout(14)
+    # Never throws: transport drops come back as 999 (chain.py convention)
+    # so one dead connection can't kill a 40-battle run.
+    try:
+        c[0].req += 1
+        send_frame(c[0].s, envelope(c[0].req, cmd, pay))
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
+    o = c[0].s.gettimeout()
+    try:
+        c[0].s.settimeout(14)
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
     try:
         _, fb = rd_frame(c[0].s)
+    except Exception as ex:
+        return 999, 'TRANSPORT: %s' % str(ex)[:100], b''
     finally:
-        c[0].s.settimeout(o)
+        try:
+            c[0].s.settimeout(o)
+        except Exception:
+            pass
     f = parse_fields(fb)
     e = f.get(4, [None])[0]
     et = f.get(5, [b''])[0]
     if isinstance(et, bytes):
         et = et.decode(errors='replace')
     return e, et.strip()[:200], (f.get(3, [b''])[0] if 3 in f else b'')
+
+def relogin():
+    """Fresh session; False only if the network is really down."""
+    for _ in range(3):
+        if connect_login(guid, sysid):
+            return True
+        time.sleep(5)
+    return False
 
 def bare():
     s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
@@ -104,58 +137,11 @@ def bare():
                 lvl=sp.get(4, [1])[0], cur=list(inner.get(4, [])),
                 inv=list(parse_fields(inner[7][0]).get(1, [])),
                 ch=parse_fields(inner[35][0]).get(1, [0])[0],
-                daily=parse_fields(inner[37][0]).get(3, [0])[0])
+                daily=parse_fields(inner[37][0]).get(3, [0])[0], inner=inner)
 
-def appearance():
-    import struct as st
-    ch = S.fvar(1, 30) + varint((2 << 3) | 1) + st.pack('<d', 0.05)
-    cs = S.fvar(1, 1) + varint((2 << 3) | 1) + st.pack('<d', 0.15)
-    return S.fvar(1, 1) + S.fvar(2, 2) + S.fbytes(3, ch) + S.fbytes(4, cs) + S.fvar(5, 7)
-
-connect_login()
-guid = str(__import__('uuid').uuid4())
-sysid = ''.join(random.choice('0123456789abcdef') for _ in range(15))
-name = fixed_name or ('N' + ''.join(random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(7)))
-if not connect_login(guid, sysid):
-    print('MINT LOGIN FAIL', flush=True)
-    raise SystemExit(1)
-c[0]._send('ping', ping_payload(sess[0]))
-try:
-    c[0]._recv()
-except Exception:
-    pass
-sv = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
-h = S.fstr(1, 'sum') + S.fstr(2, sv)
-cp = (S.fstr(1, name) + S.fbytes(2, appearance()) + S.fstr(3, CONFIG_VER)
-      + S.fbytes(4, S.fstr(1, 'dojo') + S.fstr(2, '1.1'))
-      + S.fbytes(4, S.fstr(1, 'CREG') + S.fstr(2, str(int(time.time()))))
-      + S.fbytes(5, h) + S.fstr(6, S.APP_VER))
-e, et, p = raw('create_player', cp)
-print('create err=%s name=%s' % (e, name), flush=True)
-if e is not None or not len(p):
-    print('MINT FAIL', flush=True)
-    raise SystemExit(1)
-
-ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3, 70: 2, 80: 2, 90: 2, 95: 2, 100: 3, 150: 3, 210: 3, 270: 3, 320: 3, 370: 3, 420: 3}
-BATTLES = [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60, 70, 80, 90, 95, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350, 360, 370, 380, 390, 400, 410, 420]
-unlocked = None
-for b in BATTLES:
-    rounds = ROUNDS.get(b, 2)
-    if b != 10:
-        raw('refresh_single_battle', S.fvar(1, b))
-        t_single = int(time.time() * 1000)
-        time.sleep(2.5)
-    st0 = bare()
-    if st0 is None:
-        connect_login(guid, sysid)
-        st0 = bare()
-        if st0 is None:
-            print('bare dead at %d' % b, flush=True)
-            break
-    E = st0['R'] + 1
-    decl = 20 if b == 10 else st0['exp'] + 15
-    f6 = int(time.time() * 1000) - 2200 if b == 10 else t_single + 300
-    via = 'gp' if b == 10 else 'pob'
+def submit_fight(b, st0, E, decl, f6, rounds, via):
+    """Build + submit one story fight. Returns err code (999 = transport
+    drop, submit never reached server — safe to redo)."""
     if b in GEN:
         g = GEN[b]
         F8 = [(a, bb) for a, bb in g['f8']]
@@ -176,32 +162,182 @@ for b in BATTLES:
         sv2 = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
         hh = S.fstr(1, 'sum') + S.fstr(2, sv2)
         pay = S.fstr(1, CONFIG_VER) + S.fbytes(2, S.fbytes(1, entry) + S.fbytes(2, state)) + S.fbytes(3, hh) + S.fstr(4, 'google Pixel 4') + S.fstr(5, '1.45.5')
-        e, et, p = raw('get_player', pay)
+        e, _, _ = raw('get_player', pay)
     else:
-        e, et, p = raw('process_offline_batch', S.fbytes(1, entry) + S.fbytes(2, state))
-    be, bet, bp = raw('brawler_start', None)
-    print('b%d fight=%s brawler=%s' % (b, e, be), flush=True)
-    if be is None:
-        # brawler open from 36 on; close the probe duel immediately so the
-        # account stays clean, but KEEP CHAINING to 270 (faction unlock).
-        blob = parse_fields(bp)[1][0]
-        WIN_STATS = bytes.fromhex('0802101f1a020101220209052a02010132080000803f0000803f3a08000000000000000042086666e63e6666e63e4a02030352020000')
-        WIN_ITEMS = bytes.fromhex('0a0508d10c10040a0508d20c10040a0508d93410020a0508dc341002')
-        RENT = [bytes.fromhex(s) for s in ('08031001', '08041002', '08051003', '08061002', '0807')]
-        params = (S.fbytes(1, blob) + S.fvar(2, 1) + S.fvar(3, 2) + b''.join(S.fbytes(4, x) for x in RENT) + S.fvar(5, 2) + S.fbytes(6, WIN_ITEMS) + S.fbytes(7, WIN_STATS))
-        fe, fet, fp = raw('brawler_finish', params)
-        print('probe-duel closed err=%s at %d' % (fe, b), flush=True)
-        if unlocked is None:
-            unlocked = b
-    time.sleep(0.5)
-# faction select (required: chapter-3 account per ch3farm.py/ch3worker.py STOP_AT=420)
-raw('process_finished_features', b'')
-se, set_, _ = raw('faction_wars_start_new_stage', b'')
+        e, _, _ = raw('process_offline_batch', S.fbytes(1, entry) + S.fbytes(2, state))
+    return e
+
+def appearance():
+    import struct as st
+    ch = S.fvar(1, 30) + varint((2 << 3) | 1) + st.pack('<d', 0.05)
+    cs = S.fvar(1, 1) + varint((2 << 3) | 1) + st.pack('<d', 0.15)
+    return S.fvar(1, 1) + S.fvar(2, 2) + S.fbytes(3, ch) + S.fbytes(4, cs) + S.fvar(5, 7)
+
+connect_login()
+guid = str(__import__('uuid').uuid4())
+sysid = ''.join(random.choice('0123456789abcdef') for _ in range(15))
+name = fixed_name or ('N' + ''.join(random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(7)))
+if not connect_login(guid, sysid):
+    print('MINT LOGIN FAIL', flush=True)
+    raise SystemExit(1)
+c[0]._send('ping', ping_payload(sess[0]))
+try:
+    c[0]._recv()
+except Exception:
+    pass
+def build_create():
+    sv = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
+    h = S.fstr(1, 'sum') + S.fstr(2, sv)
+    return (S.fstr(1, name) + S.fbytes(2, appearance()) + S.fstr(3, CONFIG_VER)
+            + S.fbytes(4, S.fstr(1, 'dojo') + S.fstr(2, '1.1'))
+            + S.fbytes(4, S.fstr(1, 'CREG') + S.fstr(2, str(int(time.time()))))
+            + S.fbytes(5, h) + S.fstr(6, S.APP_VER))
+
+e, et, p = None, '', b''
+for _ in range(3):
+    e, et, p = raw('create_player', build_create())
+    if e != 999:
+        break
+    print('create transport-drop; reconnect + retry', flush=True)
+    connect_login()
+print('create err=%s name=%s' % (e, name), flush=True)
+if e is not None or not len(p):
+    print('MINT FAIL', flush=True)
+    raise SystemExit(1)
+
+ROUNDS = {10: 1, 20: 2, 30: 2, 35: 2, 36: 2, 40: 3, 45: 2, 46: 2, 48: 2, 50: 1, 60: 3, 70: 2, 80: 2, 90: 2, 95: 2, 100: 3, 150: 3, 210: 3, 270: 3, 320: 3, 370: 3, 420: 3}
+BATTLES = [10, 20, 30, 35, 36, 40, 45, 46, 48, 50, 60, 70, 80, 90, 95, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350, 360, 370, 380, 390, 400, 410, 420]
+unlocked = None
+done = []
+dead = 0
+for bi, b in enumerate(BATTLES):
+    try:
+        rounds = ROUNDS.get(b, 2)
+        # Proactive fresh session every 10 battles: the server resets
+        # long-lived connections (saw RST at ~b220); cheap insurance.
+        if bi % 10 == 0 and b != 10:
+            relogin()
+        if b != 10:
+            e0, t0, _ = raw('refresh_single_battle', S.fvar(1, b))
+            if e0 == 999:
+                if not relogin():
+                    print('b%d single transport-dead, skip' % b, flush=True)
+                    dead += 1
+                    continue
+                e0, t0, _ = raw('refresh_single_battle', S.fvar(1, b))
+                if e0 == 999:
+                    print('b%d single transport-dead twice, skip' % b, flush=True)
+                    dead += 1
+                    continue
+            if e0 is not None and ('No battle' in t0 or e0 == 1):
+                print('b%d single not open (%r) — treat as done' % (b, t0[:80]), flush=True)
+                done.append(b)
+                continue
+            t_single = int(time.time() * 1000)
+            time.sleep(2.5)
+        st0 = bare()
+        if st0 is None:
+            relogin()
+            st0 = bare()
+            if st0 is None:
+                print('bare dead at %d, skip' % b, flush=True)
+                dead += 1
+                continue
+        E = st0['R'] + 1
+        decl = 20 if b == 10 else st0['exp'] + 15
+        f6 = int(time.time() * 1000) - 2200 if b == 10 else t_single + 300
+        via = 'gp' if b == 10 else 'pob'
+        submitted = submit_fight(b, st0, E, decl, f6, rounds, via)
+        if submitted == 999:
+            # Submit never reached the server: fresh session, redo once.
+            print('b%d transport drop; relogin + redo' % b, flush=True)
+            if not relogin():
+                print('b%d relogin failed, skip' % b, flush=True)
+                dead += 1
+                continue
+            if b != 10:
+                raw('refresh_single_battle', S.fvar(1, b))
+                t_single = int(time.time() * 1000)
+                time.sleep(2.5)
+            st0 = bare()
+            if st0 is None:
+                print('b%d bare failed after relogin, skip' % b, flush=True)
+                dead += 1
+                continue
+            E = st0['R'] + 1
+            decl = 20 if b == 10 else st0['exp'] + 15
+            f6 = int(time.time() * 1000) - 2200 if b == 10 else t_single + 300
+            submitted = submit_fight(b, st0, E, decl, f6, rounds, via)
+            if submitted == 999:
+                print('b%d transport dead twice, skip' % b, flush=True)
+                dead += 1
+                continue
+        e = submitted
+        be, bet, bp = raw('brawler_start', None)
+        if be == 999:
+            relogin()
+            be, bet, bp = raw('brawler_start', None)
+        print('b%d fight=%s brawler=%s' % (b, e, be), flush=True)
+        if be is None:
+            # brawler open from 36 on; close the probe duel immediately so the
+            # account stays clean, but KEEP CHAINING to 420 (chapter 3).
+            try:
+                blob = parse_fields(bp)[1][0]
+            except Exception:
+                print('probe blob parse fail at %d' % b, flush=True)
+                done.append(b)
+                time.sleep(0.5)
+                continue
+            params = (S.fbytes(1, blob) + S.fvar(2, 1) + S.fvar(3, 2) + b''.join(S.fbytes(4, x) for x in RENT) + S.fvar(5, 2) + S.fbytes(6, WIN_ITEMS) + S.fbytes(7, WIN_STATS))
+            fe, fet, fp = raw('brawler_finish', params)
+            if fe == 999:
+                relogin()
+                fe, fet, fp = raw('brawler_finish', params)
+            print('probe-duel closed err=%s at %d' % (fe, b), flush=True)
+            if unlocked is None:
+                unlocked = b
+        elif be == 50003:
+            # Previous probe finish never reached the server; close the
+            # wedged duel from the f13 blob so later battles stay clean.
+            stw = bare()
+            if stw is not None and 13 in stw['inner']:
+                try:
+                    wblob = parse_fields(stw['inner'][13][0])[1][0]
+                    wparams = (S.fbytes(1, wblob) + S.fvar(2, 1) + S.fvar(3, 2) + b''.join(S.fbytes(4, x) for x in RENT) + S.fvar(5, 2) + S.fbytes(6, WIN_ITEMS) + S.fbytes(7, WIN_STATS))
+                    we, _, _ = raw('brawler_finish', wparams)
+                    print('wedged-duel closed err=%s at %d' % (we, b), flush=True)
+                except Exception as ex:
+                    print('wedge-close fail at %d %s' % (b, str(ex)[:80]), flush=True)
+        done.append(b)
+        time.sleep(0.5)
+    except Exception as ex:
+        # One bad battle must never kill the run (this was the b220 wipeout:
+        # an uncaught socket error discarded 210 credited battles).
+        print('b%d EXC %s; continue' % (b, str(ex)[:120]), flush=True)
+        dead += 1
+        try:
+            relogin()
+        except Exception:
+            pass
+        time.sleep(0.5)
+print('CHAIN done=%d dead=%d' % (len(done), dead), flush=True)
+# faction select (required: chapter-3 account per ch3farm.py/ch3worker.py STOP_AT=420).
+# Transport-tolerant: a drop here must not lose the account either.
+def _fac(cmd, pay):
+    for _ in range(3):
+        e, t, p = raw(cmd, pay)
+        if e != 999:
+            return e, t, p
+        if not relogin():
+            return 999, 'TRANSPORT: relogin failed', b''
+    return 999, 'TRANSPORT: dead', b''
+_fac('process_finished_features', b'')
+se, set_, _ = _fac('faction_wars_start_new_stage', b'')
 print('start_new_stage err=%s' % se, flush=True)
-raw('quest_refresh', bytes.fromhex('0a0107'))
-ce, cet, _ = raw('faction_wars_choose_faction', S.fvar(1, 3))
+_fac('quest_refresh', bytes.fromhex('0a0107'))
+ce, cet, _ = _fac('faction_wars_choose_faction', S.fvar(1, 3))
 print('choose_faction(3) err=%s %s' % (ce, cet[:80]), flush=True)
-fe, fet, fpay = raw('faction_wars_get_state', b'')
+fe, fet, fpay = _fac('faction_wars_get_state', b'')
 sel = None
 try:
     _m = parse_fields(fpay)
@@ -212,12 +348,14 @@ except Exception:
 print('faction selected=%s err=%s' % (sel, fe), flush=True)
 if sel != 3:
     print('MINT WARN faction select != 3 (locked?)', flush=True)
+# ALWAYS write the row: the account exists server-side from create_player,
+# so even a partial run (e.g. died at b220) is preserved instead of lost.
 d = os.path.dirname(os.path.abspath(out))
 os.makedirs(d, exist_ok=True)
 with open(out, 'w') as fh:
     fh.write('name,guid,sysid,host\n')
     fh.write('%s,%s,%s,%s\n' % (name, guid, sysid, HOST))
-print('WROTE %s unlocked=%s' % (out, unlocked), flush=True)
+print('WROTE %s unlocked=%s done=%d dead=%d sel=%s' % (out, unlocked, len(done), dead, sel), flush=True)
 try:
     c[0].close()
 except Exception:

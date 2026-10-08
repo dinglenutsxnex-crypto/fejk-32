@@ -1,4 +1,4 @@
-name: rename-eu
+name: rename accounts
 
 on:
   workflow_dispatch:

@@ -38,7 +38,7 @@ import sys
 APP_ID = "com.nekki.shadowfight3"
 BNAME = "UnityClient_ShadowFight3_UnityClientShadowFight3Release_ConfigurationAndroid"
 V = "19221"
-CONFIG_VER = "1.46.0.10.16731-prod"
+CONFIG_VER = "1.46.0.11.16732-prod"
 APP_VER = "1.46.0"
 # Static APK-signing-cert hash (Nekki upload cert, RSA-1024, from the .apks
 # v2/v3 block). Login extData `f` = SHA1hex(session + X_CERT).upper().

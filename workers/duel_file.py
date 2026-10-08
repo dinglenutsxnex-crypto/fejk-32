@@ -104,12 +104,32 @@ def raw(cmd, pay=None):
     e = f.get(4, [None])[0]
     return e, (f.get(3, [b''])[0] if 3 in f else b''), b''
 
-def close_stale():
+def is_clean():
+    """True iff no open duel (f13 absent). None on unreadable state."""
     try:
         s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
         h = S.fstr(1, 'sum') + S.fstr(2, s)
         e, p, _ = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
         if e is not None or not len(p):
+            return None
+        top = parse_fields(p)
+        if 1 not in top or not isinstance(top[1][0], bytes):
+            return None
+        return 13 not in parse_fields(top[1][0])
+    except Exception:
+        return None
+
+def close_stale():
+    # Finish processing is ASYNC: the reply acks instantly but f13/start
+    # reflect the queue with lag (seconds-minutes under load). So: finish
+    # ONCE per blob, then POLL for the apply — never rapid-fire finishes,
+    # which only grow the queue and look like ignored acks.
+    try:
+        s = hashlib.sha1((sess[0] + D_SUM).encode()).hexdigest().upper()
+        h = S.fstr(1, 'sum') + S.fstr(2, s)
+        e, p, _ = raw('get_player', S.fstr(1, CONFIG_VER) + fbytes(2, b'') + fbytes(3, h) + S.fstr(4, 'google Pixel 4') + S.fstr(5, S.APP_VER))
+        if e is not None or not len(p):
+            print('close_stale: unreadable gp e=%s' % e, flush=True)
             return False
         top = parse_fields(p)
         if 1 not in top or not isinstance(top[1][0], bytes):
@@ -120,9 +140,21 @@ def close_stale():
         blob = parse_fields(inner[13][0])[1][0]
         params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
         e, pr, _ = raw('brawler_finish', params)
-        return e is None
-    except Exception:
+        print('close_stale: finish e=%s pay=%d' % (e, len(pr)), flush=True)
+        if e == 999:
+            return False
+    except Exception as ex:
+        print('close_stale EXC %s' % str(ex)[:100], flush=True)
         return False
+    for wait in (15, 20, 30, 30, 30):
+        time.sleep(wait)
+        clean = is_clean()
+        print('close_stale: poll clean=%s' % clean, flush=True)
+        if clean:
+            return True
+        if clean is None:
+            relogin()
+    return False
 
 class _OnBoard(Exception):
     pass
@@ -155,7 +187,17 @@ for _ in range(3):
 if PID is None:
     print('PID FAIL %s (account flagged? route dead?)' % csvfile, flush=True)
     raise SystemExit(1)
-close_stale()
+for _ in range(2):
+    clean = is_clean()
+    if clean:
+        break
+    print('startup wedge detected; close+patient-verify', flush=True)
+    close_stale()
+else:
+    clean = is_clean()
+if not clean:
+    print('STARTUP WEDGE STUCK %s; giving up slot early' % csvfile, flush=True)
+    raise SystemExit(3)
 wins = fails = i = 0
 losses_around = 0
 consec_fail = 0
@@ -164,6 +206,7 @@ try:
     while time.time() < T_END and (maxwins <= 0 or wins < maxwins):
         i += 1
         ok = False
+        fail_why = 'unknown'
         for att in range(3):
             if i % 10 == 1 and att == 0:
                 try:
@@ -175,23 +218,41 @@ try:
             if e == 999:
                 # Drop before the server saw anything: fresh session, redo once.
                 if not relogin():
+                    fail_why = 'start-transport-dead'
                     break
                 e, p, _ = raw('brawler_start', None)
                 if e == 999:
+                    fail_why = 'start-transport-dead-x2'
                     break
             if e == 50003:
-                close_stale()
-                time.sleep(2)
-                continue
+                # May be a genuinely open duel OR lagging async state.
+                # Wait it out first (a blind close+restart cycle is what
+                # wedged the whole AS fleet); only close if it persists.
+                time.sleep(20)
+                e2, p2, _ = raw('brawler_start', None)
+                if e2 is None and len(p2):
+                    e, p = e2, p2
+                else:
+                    if not close_stale():
+                        fail_why = 'start-50003-stuck'
+                        time.sleep(60)
+                        break
+                    fail_why = 'start-50003-wedged'
+                    time.sleep(10)
+                    continue
             if e is not None or not len(p):
                 if e is None:
+                    fail_why = 'start-empty'
                     break
+                fail_why = 'start-err-%s' % e
                 if not relogin():
+                    fail_why = 'relogin-dead'
                     break
                 continue
             try:
                 blob = parse_fields(p)[1][0]
             except Exception:
+                fail_why = 'blob-parse'
                 break
                 # Humanization: mostly 2-0 wins, every loss_every-th duel is a
                 # minimal genuine-shaped loss (duel_api sec 7). Identical
@@ -203,20 +264,22 @@ try:
                     params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
                 e, pr, _ = raw('brawler_finish', params)
                 if e == 999:
+                    # Finish may or may not have reached the server — check
+                    # state instead of guessing (blind re-start self-wedges).
                     if not relogin():
+                        fail_why = 'finish-transport-dead'
                         break
-                    e, pr, _ = raw('brawler_start', None)
-                    if e == 999 or e is not None or not len(pr):
+                    st = is_clean()
+                    if st is None:
+                        fail_why = 'finish-state-unknown'
                         break
-                    try:
-                        blob = parse_fields(pr)[1][0]
-                    except Exception:
-                        break
-                    if is_loss:
-                        params = fbytes(1, blob) + fvar(2, 2) + fvar(3, 2)
-                    else:
-                        params = (fbytes(1, blob) + fvar(2, 1) + fvar(3, 2) + b''.join(fbytes(4, x) for x in RE) + fvar(5, 2) + fbytes(6, WI) + fbytes(7, WS))
-                    e, pr, _ = raw('brawler_finish', params)
+                    if st:
+                        continue  # finish landed -> fresh start next att
+                    if close_stale():
+                        continue  # closed -> fresh start next att
+                    fail_why = 'finish-wedge-stuck'
+                    time.sleep(30)
+                    break
                 if e is None and len(pr):
                     if is_loss:
                         losses_around += 1
@@ -227,18 +290,25 @@ try:
                     if pace > 0 or jitter > 0:
                         time.sleep(pace + random.uniform(0, jitter))
                     break
+                fail_why = 'finish-err-%s' % e
                 if not relogin():
+                    fail_why = 'finish-relogin-dead'
                     break
                 break
             except Exception as ex:
                 print('duel EXC %s; relogin' % str(ex)[:80], flush=True)
+                fail_why = 'exc'
                 if not relogin():
+                    fail_why = 'exc-relogin-dead'
                     break
                 time.sleep(2)
                 continue
         if not ok:
             fails += 1
             consec_fail += 1
+            if fail_why == 'unknown':
+                fail_why = 'atts-exhausted'
+            print('fail i=%d why=%s wins=%d' % (i, fail_why, wins), flush=True)
             if consec_fail >= 15:
                 print('WEDGED %d consecutive fails (account flagged?); giving up slot' % consec_fail, flush=True)
                 break
@@ -255,7 +325,13 @@ try:
                 if e == 999 or e is not None or not len(p):
                     print('board-check skip (e=%s)' % e, flush=True)
                 else:
-                    rows = parse_fields(parse_fields(p)[2][0])[1]
+                    try:
+                        rows = parse_fields(parse_fields(p)[2][0])[1]
+                    except Exception as ex:
+                        print('board-check parse fail %s' % str(ex)[:80], flush=True)
+                        rows = []
+                    if not rows:
+                        print('board-check empty rows', flush=True)
                     mine = (None, None)
                     top_out = ('?', 0)
                     for k, r in enumerate(rows):
